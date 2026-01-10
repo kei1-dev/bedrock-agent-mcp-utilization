@@ -93,7 +93,7 @@ devcontainer exec --workspace-folder . npm install
 
 ### 4. AWS認証情報の設定
 
-ローカルのAWS認証情報がdevcontainer内で利用可能であることを確認してください。
+AWS認証情報の設定方法については [infra/README.md](./infra/README.md) を参照してください。
 
 ## デプロイ
 
