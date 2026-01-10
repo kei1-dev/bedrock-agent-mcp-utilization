@@ -1,0 +1,10 @@
+{
+  "name": "Bedrock Agent MCP",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": ["--privileged"],
+  "remoteUser": "vscode",
+  "postCreateCommand": "fnm install && fnm use",
+  "postStartCommand": "sudo dockerd > /tmp/dockerd.log 2>&1 & sleep 2 && if [ -d \"${localEnv:HOME}/.aws\" ]; then mkdir -p ~/.aws && cp -r ${localEnv:HOME}/.aws/* ~/.aws/ 2>/dev/null || true; fi"
+}
