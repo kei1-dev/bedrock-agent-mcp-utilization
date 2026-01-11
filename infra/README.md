@@ -4,14 +4,17 @@
 
 ## 概要
 
-シンプルなBedrock Agent（Claude Sonnet 4.5）を最小構成でデプロイします。
+Bedrock Agent と AgentCore Gateway を使用した MCP 統合をデプロイします。
 
 ### 作成されるリソース
 
 | リソース | 説明 |
 |---------|------|
-| Bedrock Agent | Claude Sonnet 4.5 を使用したAIエージェント |
+| Bedrock Agent | Claude Sonnet 4.5 を使用したAIエージェント（日本リージョン用推論プロファイル経由） |
 | Agent Alias | 本番呼び出し用エイリアス (`live`) |
+| AgentCore Gateway | MCP プロトコルに準拠したエンドポイントを提供（IAM認証） |
+| Action Group Lambda | Bedrock Agent → Gateway ブリッジ（SigV4認証でMCPエンドポイント呼び出し） |
+| MCP Tool Lambda | 現在時刻取得ツール（JST）を提供 |
 
 ## 前提条件
 
