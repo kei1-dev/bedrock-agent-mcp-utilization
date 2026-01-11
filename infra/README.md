@@ -4,14 +4,17 @@
 
 ## 概要
 
-シンプルなBedrock Agent（Claude Sonnet 4.5）を最小構成でデプロイします。
+Bedrock Agent と AgentCore Gateway を使用した MCP 統合をデプロイします。
 
 ### 作成されるリソース
 
 | リソース | 説明 |
 |---------|------|
-| Bedrock Agent | Claude Sonnet 4.5 を使用したAIエージェント |
+| Bedrock Agent | Claude Sonnet 4.5 を使用したAIエージェント（日本リージョン用推論プロファイル経由） |
 | Agent Alias | 本番呼び出し用エイリアス (`live`) |
+| AgentCore Gateway | MCP プロトコルに準拠したエンドポイントを提供（IAM認証） |
+| Action Group Lambda | Bedrock Agent → Gateway ブリッジ（SigV4認証でMCPエンドポイント呼び出し） |
+| MCP Tool Lambda | 現在時刻取得ツール（JST）を提供 |
 
 ## 前提条件
 
@@ -66,6 +69,30 @@ devcontainer exec --workspace-folder . aws sts get-caller-identity
 }
 ```
 
+## エージェントのバージョンとエイリアス
+
+Bedrock Agentには**バージョン**と**エイリアス**の概念があります。
+
+### バージョン
+
+| バージョン | 説明 |
+|-----------|------|
+| DRAFT | 編集可能な作業用バージョン。`cdk deploy`で更新される |
+| 番号付き (1, 2, 3...) | 不変のスナップショット。新しいエイリアス作成時に自動生成 |
+
+### エイリアス
+
+| エイリアス | 説明 |
+|-----------|------|
+| TSTALIASID | テスト用。DRAFTバージョンを直接参照可能 |
+| live | 本番用。番号付きバージョンを参照 |
+
+### 重要な注意点
+
+- `npx cdk deploy`はDRAFTバージョンを更新するが、**番号付きバージョンは自動作成されない**
+- 本番エイリアス（`live`）を最新のDRAFTに追従させるには、手動でバージョン作成とエイリアス更新が必要
+- 詳細は「5. エイリアスを最新バージョンに更新」を参照
+
 ## デプロイ手順
 
 ### 1. 依存関係のインストール
@@ -100,6 +127,58 @@ npx cdk deploy
 - `AgentId`: Bedrock Agent の ID
 - `AgentAliasId`: Agent Alias の ID
 
+### 5. エイリアスを最新バージョンに更新（2回目以降のデプロイ時）
+
+`cdk deploy`後、本番エイリアス（`live`）を最新のDRAFTから作成した新バージョンに更新します。
+
+```bash
+# 環境変数を設定（デプロイ時の出力値を使用）
+export AGENT_ID=<AgentId>
+export LIVE_ALIAS_ID=<AgentAliasId>
+
+# 現在のエイリアスが参照しているバージョンを確認
+aws bedrock-agent get-agent-alias \
+  --agent-id $AGENT_ID \
+  --agent-alias-id $LIVE_ALIAS_ID \
+  --query 'agentAlias.routingConfiguration[0].agentVersion' \
+  --output text
+
+# 新しいバージョンを作成するために一時エイリアスを作成
+TEMP_ALIAS_ID=$(aws bedrock-agent create-agent-alias \
+  --agent-id $AGENT_ID \
+  --agent-alias-name temp-version \
+  --query 'agentAlias.agentAliasId' \
+  --output text)
+
+echo "Created temp alias: $TEMP_ALIAS_ID"
+
+# 作成されたバージョン番号を確認（数秒待つ）
+sleep 3
+NEW_VERSION=$(aws bedrock-agent get-agent-alias \
+  --agent-id $AGENT_ID \
+  --agent-alias-id $TEMP_ALIAS_ID \
+  --query 'agentAlias.routingConfiguration[0].agentVersion' \
+  --output text)
+
+echo "New version: $NEW_VERSION"
+
+# liveエイリアスを新しいバージョンに更新
+aws bedrock-agent update-agent-alias \
+  --agent-id $AGENT_ID \
+  --agent-alias-id $LIVE_ALIAS_ID \
+  --agent-alias-name live \
+  --routing-configuration "[{\"agentVersion\": \"$NEW_VERSION\"}]"
+
+# 一時エイリアスを削除
+aws bedrock-agent delete-agent-alias \
+  --agent-id $AGENT_ID \
+  --agent-alias-id $TEMP_ALIAS_ID
+
+echo "Updated live alias to version $NEW_VERSION"
+```
+
+> **ヒント**: 初回デプロイ時はCDKが自動的にバージョンを作成するため、この手順は不要です。
+
 ## 便利なコマンド
 
 | コマンド | 説明 |
@@ -111,6 +190,15 @@ npx cdk deploy
 | `npx cdk diff` | デプロイ済みスタックとの差分を表示 |
 | `npx cdk deploy` | スタックをデプロイ |
 | `npx cdk destroy` | スタックを削除 |
+
+### エージェント管理コマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `aws bedrock-agent list-agent-versions --agent-id <ID>` | バージョン一覧を表示 |
+| `aws bedrock-agent list-agent-aliases --agent-id <ID>` | エイリアス一覧を表示 |
+| `aws bedrock-agent get-agent-alias --agent-id <ID> --agent-alias-id <ALIAS_ID>` | エイリアスの詳細を表示 |
+| `aws bedrock-agent prepare-agent --agent-id <ID>` | DRAFTバージョンを準備 |
 
 ## 動作確認
 

@@ -17,7 +17,7 @@
 import {
   BedrockAgentRuntimeClient,
   InvokeAgentCommand,
-  InvokeAgentCommandOutput,
+  type InvokeAgentCommandOutput,
 } from '@aws-sdk/client-bedrock-agent-runtime';
 
 interface Args {
@@ -122,12 +122,12 @@ async function invokeAgent(args: Args): Promise<void> {
 
     // ストリーミングレスポンスを処理
     if (response.completion) {
-      let fullResponse = '';
+      let _fullResponse = '';
 
       for await (const event of response.completion) {
         if (event.chunk?.bytes) {
           const text = new TextDecoder().decode(event.chunk.bytes);
-          fullResponse += text;
+          _fullResponse += text;
           process.stdout.write(text);
         }
 

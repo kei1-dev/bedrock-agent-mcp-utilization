@@ -8,20 +8,32 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "lint:fix:unsafe": "biome check --write --unsafe .",
+    "format": "biome format --write ."
   },
   "devDependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/credential-provider-node": "^3.966.0",
+    "@smithy/signature-v4": "^5.3.7",
+    "@biomejs/biome": "^1.9.4",
     "@types/jest": "^30",
     "@types/node": "^24.10.1",
+    "aws-cdk": "2.1100.3",
+    "aws4fetch": "^1.0.20",
+    "esbuild": "^0.25.0",
     "jest": "^30",
     "ts-jest": "^29",
-    "aws-cdk": "2.1100.3",
     "ts-node": "^10.9.2",
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@aws-cdk/aws-bedrock-agentcore-alpha": "2.234.1-alpha.0",
     "@aws-cdk/aws-bedrock-alpha": "2.234.1-alpha.0",
     "@aws-sdk/client-bedrock-agent-runtime": "^3.800.0",
+    "@types/aws-lambda": "^8.10.137",
     "aws-cdk-lib": "2.234.1",
     "constructs": "^10.0.0"
   }
