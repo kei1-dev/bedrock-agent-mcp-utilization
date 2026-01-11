@@ -17,24 +17,20 @@ function getCurrentTime(): ToolResult {
     content: [
       {
         type: 'text',
-        text: jstTime.toISOString().replace('T', ' ').substring(0, 19) + ' JST',
+        text: `${jstTime.toISOString().replace('T', ' ').substring(0, 19)} JST`,
       },
     ],
   };
 }
 
 function getToolName(context: any): string {
-  const custom =
-    context?.clientContext?.custom ?? context?.client_context?.custom ?? {};
+  const custom = context?.clientContext?.custom ?? context?.client_context?.custom ?? {};
   const fullName: string = custom.bedrockAgentCoreToolName ?? '';
   const parts = fullName.split('___');
   return parts.length > 1 ? parts.slice(1).join('___') : fullName;
 }
 
-export const handler = async (
-  _event: any,
-  context: any
-): Promise<ToolResult> => {
+export const handler = async (_event: any, context: any): Promise<ToolResult> => {
   const toolName = getToolName(context);
 
   if (toolName !== 'getCurrentTime') {

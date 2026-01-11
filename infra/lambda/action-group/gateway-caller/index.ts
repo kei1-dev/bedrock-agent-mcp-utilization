@@ -1,4 +1,3 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { AwsClient } from 'aws4fetch';
 
 /**
@@ -66,13 +65,10 @@ interface MCPResponse {
   };
 }
 
-export const handler = async (
-  event: BedrockAgentInput
-): Promise<BedrockAgentResponse> => {
+export const handler = async (event: BedrockAgentInput): Promise<BedrockAgentResponse> => {
   console.log('Received Bedrock Agent event:', JSON.stringify(event, null, 2));
 
   try {
-
     // Extract Gateway endpoint from environment variable
     const gatewayEndpoint = process.env.GATEWAY_ENDPOINT;
     if (!gatewayEndpoint) {
@@ -94,10 +90,11 @@ export const handler = async (
     if (!targetName) {
       throw new Error('TARGET_NAME environment variable is required');
     }
-    
+
     const toolName = event.function;
     const mcpToolName = `${targetName}___${toolName}`;
-    const toolArgs = event.parameters && event.parameters.length > 0 ? event.parameters[0].value : undefined;
+    const toolArgs =
+      event.parameters && event.parameters.length > 0 ? event.parameters[0].value : undefined;
 
     console.log(`Calling tool: ${toolName} -> MCP tool: ${mcpToolName}, args: ${toolArgs}`);
 
@@ -106,7 +103,7 @@ export const handler = async (
       id: Date.now(), // Generate unique ID
       method: 'tools/call',
       params: {
-        name: mcpToolName,  // Use prefixed tool name for Gateway
+        name: mcpToolName, // Use prefixed tool name for Gateway
         arguments: toolArgs ? JSON.parse(toolArgs) : {},
       },
     };
@@ -126,7 +123,7 @@ export const handler = async (
       throw new Error(`Gateway call failed: ${response.status} ${response.statusText}`);
     }
 
-    const mcpResponse = await response.json() as MCPResponse;
+    const mcpResponse = (await response.json()) as MCPResponse;
     console.log('Received MCP response:', JSON.stringify(mcpResponse, null, 2));
 
     // Handle MCP error
@@ -156,7 +153,6 @@ export const handler = async (
     };
 
     return bedrockResponse;
-
   } catch (error) {
     console.error('Error processing request:', error);
 

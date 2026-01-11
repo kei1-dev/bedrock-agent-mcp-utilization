@@ -1,12 +1,11 @@
-import * as cdk from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
-import * as bedrock from '@aws-cdk/aws-bedrock-alpha';
+import * as path from 'node:path';
 import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
-import { ParameterType } from '@aws-cdk/aws-bedrock-alpha';
+import * as bedrock from '@aws-cdk/aws-bedrock-alpha';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambda_nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as path from 'path';
+import * as cdk from 'aws-cdk-lib/core';
+import type { Construct } from 'constructs';
 
 export class InfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -87,7 +86,7 @@ export class InfraStack extends cdk.Stack {
       description: 'Bedrock Agent Action Group that calls AgentCore Gateway MCP endpoint',
       environment: {
         GATEWAY_ENDPOINT: `https://${gateway.gatewayId}.gateway.bedrock-agentcore.${cdk.Aws.REGION}.amazonaws.com`,
-        TARGET_NAME: targetName,  // Required for MCP tool name prefixing
+        TARGET_NAME: targetName, // Required for MCP tool name prefixing
       },
       bundling: {
         minify: false,
