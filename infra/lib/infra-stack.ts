@@ -42,14 +42,12 @@ export class InfraStack extends cdk.Stack {
     });
 
     // MCP Tool Lambda Function (using NodejsFunction for TypeScript bundling)
-    // AgentCore Gateway uses Lambda Response Streaming (InvokeWithResponseStream)
-    // so we need to use the streamingHandler export
     const currentTimeFunction = new lambda_nodejs.NodejsFunction(this, 'CurrentTimeFunction', {
       runtime: lambda.Runtime.NODEJS_24_X,
       entry: path.join(__dirname, '../lambda/mcp-tools/current-time/index.ts'),
-      handler: 'streamingHandler',  // Use streaming handler for Gateway invocation
+      handler: 'handler',
       functionName: 'bedrock-agent-mcp-current-time',
-      description: 'MCP tool that returns current time in JST (streaming enabled)',
+      description: 'MCP tool that returns current time in JST',
       bundling: {
         minify: false,
         sourceMap: true,
