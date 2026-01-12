@@ -9,13 +9,21 @@
 ### アーキテクチャ構成
 
 ```
-User → Bedrock Agent (Claude 4.5) → Action Group Lambda → AgentCore Gateway → MCP Tool Lambda
+User → Bedrock Agent (Claude 4.5) → Action Group Lambda(s) → AgentCore Gateway → MCP Tool Lambda(s)
+                                                    │                                                    │
+                                                    │                                                    └─→ AWS MCP Server
+                                                    │
+                                                    └─→ Simple MCP Tools (current-time)
 ```
 
 - **Bedrock Agent**: Claude Sonnet 4.5 を使用、日本リージョン用推論プロファイル経由
-- **Action Group Lambda**: SigV4 認証で Gateway MCP エンドポイントを呼び出すブリッジ
-- **AgentCore Gateway**: IAM 認証付き MCP エンドポイント
-- **MCP Tool Lambda**: 実際のツール機能（現在時刻取得など）
+- **Action Group Lambda(s)**:
+  - `gateway-caller`: SigV4 認証で Gateway MCP エンドポイントを呼び出すブリッジ (現在時刻用)
+  - `aws-mcp-caller`: AWS MCP Tools 用 Action Group Lambda
+- **AgentCore Gateway**: IAM 認証付き MCP エンドポイント、複数の Lambda Target を管理
+- **MCP Tool Lambda(s)**:
+  - `current-time`: シンプルな MCP ツール（現在時刻取得）
+  - `aws-mcp-proxy`: AWS MCP Server (https://aws-mcp.us-east-1.api.aws/mcp) へのプロキシ
 
 ## ビルド/リント/テストコマンド
 
@@ -280,12 +288,52 @@ gateway.addLambdaTarget('CurrentTimeTargetV2', {
   toolSchema: agentcore.ToolSchema.fromInline([
     {
       name: 'getCurrentTime',
-      description: 'Get the current time in Japan Standard Time (JST)',
+      description: 'Get current time in Japan Standard Time (JST)',
       inputSchema: {
         type: 'object',
         properties: {},
       } as any,  // CDK で型が厳密でない場合のみ使用
     },
+  ]),
+});
+
+// AWS MCP Proxy Lambda Target の追加
+const awsMcpProxyFunction = new lambda_nodejs.NodejsFunction(this, 'AwsMcpProxyFunction', {
+  runtime: lambda.Runtime.NODEJS_24_X,
+  entry: path.join(__dirname, '../lambda/mcp-tools/aws-mcp-proxy/index.ts'),
+  handler: 'handler',
+  functionName: 'bedrock-agent-aws-mcp-proxy',
+  timeout: cdk.Duration.seconds(120),
+  bundling: {
+    minify: false,
+    sourceMap: true,
+    target: 'node24',
+  },
+});
+
+awsMcpProxyFunction.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['aws-mcp:InvokeMcp', 'aws-mcp:CallReadOnlyTool'],
+    resources: ['*'],
+  })
+);
+
+const awsMcpTargetName = 'aws-mcp-proxy';
+gateway.addLambdaTarget('AwsMcpProxyTarget', {
+  gatewayTargetName: awsMcpTargetName,
+  lambdaFunction: awsMcpProxyFunction,
+  toolSchema: agentcore.ToolSchema.fromInline([
+    {
+      name: 'search_documentation',
+      description: 'Search across all AWS documentation',
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      } as any,
+    },
+    // ... 他の AWS MCP ツール
   ]),
 });
 
@@ -297,6 +345,10 @@ new cdk.CfnOutput(this, 'AgentId', {
 new cdk.CfnOutput(this, 'GatewayEndpoint', {
   value: `https://${gateway.gatewayId}.gateway.bedrock-agentcore.${cdk.Aws.REGION}.amazonaws.com`,
   description: 'AgentCore Gateway MCP Endpoint',
+});
+new cdk.CfnOutput(this, 'AwsMcpCallerFunctionArn', {
+  value: awsMcpCallerFunction.functionArn,
+  description: 'AWS MCP Caller Lambda ARN (for Action Group configuration)',
 });
 ```
 
@@ -365,6 +417,51 @@ export const handler = async (_event: any, context: any): Promise<ToolResult> =>
 };
 ```
 
+### AWS MCP Proxy Lambda パターン
+
+```typescript
+// AWS MCP Server (https://aws-mcp.us-east-1.api.aws/mcp) へのプロキシ
+// SigV4 認証 (service: 'aws-mcp', region: 'us-east-1') でリクエストを転送
+
+import { AwsClient } from 'aws4fetch';
+
+const AWS_MCP_ENDPOINT = 'https://aws-mcp.us-east-1.api.aws/mcp';
+
+export const handler = async (event: any, context: any): Promise<ToolResult> => {
+  const toolName = getToolName(context);
+
+  const aws = new AwsClient({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    sessionToken: process.env.AWS_SESSION_TOKEN,
+    service: 'aws-mcp',
+    region: 'us-east-1',
+  });
+
+  // AWS MCP Server のツール名形式: aws___<tool_name>
+  const awsMcpToolName = toolName.startsWith('aws___') ? toolName : `aws___${toolName}`;
+
+  const mcpRequest = {
+    jsonrpc: '2.0',
+    id: Date.now(),
+    method: 'tools/call',
+    params: {
+      name: awsMcpToolName,
+      arguments: event || {},
+    },
+  };
+
+  const response = await aws.fetch(AWS_MCP_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mcpRequest),
+  });
+
+  const mcpResponse = await response.json();
+  return mcpResponse.result;
+};
+```
+
 ### Documentation
 
 - **JSDoc comments**: エクスポートされた関数と複雑なインターフェースに使用
@@ -381,12 +478,18 @@ infra/
 │   └── infra-stack.ts          # メインスタック定義
 ├── lambda/
 │   ├── action-group/
-│   │   └── gateway-caller/
-│   │       ├── index.ts        # Bedrock Agent → Gateway ブリッジ
+│   │   ├── gateway-caller/
+│   │   │   ├── index.ts        # Bedrock Agent → Gateway ブリッジ (現在時刻用)
+│   │   │   └── package.json
+│   │   └── aws-mcp-caller/
+│   │       ├── index.ts        # AWS MCP Tools 用 Action Group Lambda
 │   │       └── package.json
 │   └── mcp-tools/
-│       └── current-time/
-│           └── index.ts        # MCP ツール実装
+│       ├── current-time/
+│       │   └── index.ts        # MCP ツール実装 (現在時刻)
+│       └── aws-mcp-proxy/
+│           ├── index.ts        # AWS MCP Server へのプロキシ
+│           └── package.json
 ├── test/
 │   └── invoke-agent.ts         # エージェント動作確認スクリプト
 ├── biome.json                  # Biome リンター/フォーマッター設定
@@ -404,6 +507,7 @@ infra/
 - **Input validation**: Validate all inputs, especially from external sources
 - **Error messages**: エラーメッセージで機密情報を公開しない
 - **SigV4 authentication**: AgentCore Gateway への呼び出しは `aws4fetch` で署名
+- **AWS MCP Server access**: `aws-mcp:InvokeMcp` と `aws-mcp:CallReadOnlyTool` のみ許可（Write 操作を禁止）
 
 ### Development Workflow
 
@@ -434,3 +538,86 @@ Example: `feat: add MCP gateway integration for Bedrock Agent`
 - **Japanese comments**: コードベースには日本語のコメントが含まれています - 一貫性を維持してください
 - **Biome**: ESLint/Prettier ではなく Biome を使用しています
 
+---
+
+## AWS MCP Tools 統合
+
+### 概要
+
+AWS MCP Server (https://aws-mcp.us-east-1.api.aws/mcp) を通じて、AWS ドキュメント検索、API 呼び出し（Read-only）などの機能を提供します。
+
+### 公開ツール一覧
+
+| ツール名 | 説明 | 必須パラメータ |
+|----------|------|----------------|
+| `search_documentation` | AWS ドキュメント検索 | `query` |
+| `read_documentation` | ドキュメントページ取得 | `url` |
+| `list_regions` | AWS リージョン一覧 | なし |
+| `get_regional_availability` | サービスのリージョン対応状況 | `service` |
+| `suggest_aws_commands` | AWS API コマンド提案 | `query` |
+| `call_aws` | AWS API 呼び出し (Read-only) | `service`, `operation` |
+
+### Action Group の CDK 定義
+
+Action Group は CDK L2 コンストラクトで定義されており、デプロイ時に自動作成されます。手動作業は不要です。
+
+```typescript
+// Current Time Action Group
+const currentTimeActionGroup = new bedrock.AgentActionGroup({
+  name: 'CurrentTimeTools',
+  description: 'Tools for getting current time in JST',
+  executor: bedrock.ActionGroupExecutor.fromLambda(gatewayCallerFunction),
+  functionSchema: new bedrock.FunctionSchema({
+    functions: [
+      {
+        name: 'getCurrentTime',
+        description: 'Get the current time in Japan Standard Time (JST)',
+        parameters: {},
+      },
+    ],
+  }),
+  enabled: true,
+});
+
+// AWS MCP Action Group
+const awsMcpActionGroup = new bedrock.AgentActionGroup({
+  name: 'AwsMcpTools',
+  description: 'AWS MCP tools for documentation search and read-only API access',
+  executor: bedrock.ActionGroupExecutor.fromLambda(awsMcpCallerFunction),
+  functionSchema: new bedrock.FunctionSchema({
+    functions: [
+      {
+        name: 'search_documentation',
+        description: 'Search across all AWS documentation...',
+        parameters: {
+          query: {
+            type: bedrock.ParameterType.STRING,
+            required: true,
+            description: 'Search query string',
+          },
+        },
+      },
+      // ... 他のツール定義
+    ],
+  }),
+  enabled: true,
+});
+
+// Agent に Action Group を追加
+const agent = new bedrock.Agent(this, 'SimpleBedrockAgent', {
+  // ...
+  actionGroups: [currentTimeActionGroup, awsMcpActionGroup],
+});
+```
+
+### Agent Instruction
+
+Agent の instruction には、利用可能なすべてのツールの説明が含まれています：
+
+1. **search_documentation**: AWS ドキュメント検索
+2. **read_documentation**: ドキュメントページ取得
+3. **list_regions**: AWS リージョン一覧
+4. **get_regional_availability**: サービスのリージョン対応状況
+5. **suggest_aws_commands**: AWS API コマンド提案
+6. **call_aws**: AWS API 呼び出し (Read-only)
+7. **getCurrentTime**: 日本標準時での現在時刻取得

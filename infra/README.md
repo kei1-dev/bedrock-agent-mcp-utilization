@@ -13,8 +13,22 @@ Bedrock Agent と AgentCore Gateway を使用した MCP 統合をデプロイし
 | Bedrock Agent | Claude Sonnet 4.5 を使用したAIエージェント（日本リージョン用推論プロファイル経由） |
 | Agent Alias | 本番呼び出し用エイリアス (`live`) |
 | AgentCore Gateway | MCP プロトコルに準拠したエンドポイントを提供（IAM認証） |
-| Action Group Lambda | Bedrock Agent → Gateway ブリッジ（SigV4認証でMCPエンドポイント呼び出し） |
-| MCP Tool Lambda | 現在時刻取得ツール（JST）を提供 |
+| Gateway Caller Lambda | Bedrock Agent → Gateway ブリッジ（現在時刻ツール用） |
+| AWS MCP Caller Lambda | Bedrock Agent → Gateway ブリッジ（AWS MCP Tools用） |
+| Current Time Lambda | 現在時刻取得ツール（JST）を提供 |
+| AWS MCP Proxy Lambda | AWS MCP Server へのプロキシ（Read-only操作のみ） |
+
+### 利用可能なツール
+
+| ツール名 | Action Group | 説明 |
+|---------|--------------|------|
+| `getCurrentTime` | CurrentTimeTools | 日本標準時(JST)での現在時刻を取得 |
+| `search_documentation` | AwsMcpTools | AWS ドキュメント検索 |
+| `read_documentation` | AwsMcpTools | AWS ドキュメントページを取得 |
+| `list_regions` | AwsMcpTools | AWS リージョン一覧を取得 |
+| `get_regional_availability` | AwsMcpTools | サービスのリージョン対応状況を確認 |
+| `suggest_aws_commands` | AwsMcpTools | AWS API コマンドを提案 |
+| `call_aws` | AwsMcpTools | 読み取り専用 AWS API を呼び出し |
 
 ## 前提条件
 
@@ -232,11 +246,41 @@ npx ts-node test/invoke-agent.ts \
   --alias-id PTZI9TKPDT \
   --input "こんにちは。あなたは何ができますか？"
 
+# 現在時刻を取得
+npx ts-node test/invoke-agent.ts \
+  --agent-id YSKLF2T8GL \
+  --alias-id PTZI9TKPDT \
+  --input "今何時ですか？"
+
+# AWS ドキュメント検索
+npx ts-node test/invoke-agent.ts \
+  --agent-id YSKLF2T8GL \
+  --alias-id PTZI9TKPDT \
+  --input "AWS Lambda のコールドスタートについて調べてください"
+
+# リージョン一覧を取得
+npx ts-node test/invoke-agent.ts \
+  --agent-id YSKLF2T8GL \
+  --alias-id PTZI9TKPDT \
+  --input "AWSのリージョン一覧を教えて"
+
+# Bedrock のリージョン対応状況を確認
+npx ts-node test/invoke-agent.ts \
+  --agent-id YSKLF2T8GL \
+  --alias-id PTZI9TKPDT \
+  --input "Bedrockはどのリージョンで利用できますか？"
+
+# AWS API コマンドを提案
+npx ts-node test/invoke-agent.ts \
+  --agent-id YSKLF2T8GL \
+  --alias-id PTZI9TKPDT \
+  --input "S3バケットの一覧を取得する方法を教えて"
+
 # トレース情報を表示
 npx ts-node test/invoke-agent.ts \
   --agent-id YSKLF2T8GL \
   --alias-id PTZI9TKPDT \
-  --input "今日の天気は？" \
+  --input "Lambda関数の一覧を取得してください" \
   --trace
 ```
 
@@ -255,10 +299,31 @@ Region:      ap-northeast-1
 
 応答:
 ----------------------------------------
-こんにちは！私は親切で丁寧なアシスタントです。...
+こんにちは！私は以下の機能を持つアシスタントです：
+
+1. **現在時刻の取得**: 日本標準時(JST)での現在時刻をお伝えできます
+2. **AWSドキュメント検索**: AWSのドキュメント、APIリファレンス、ベストプラクティスを検索できます
+3. **AWSリージョン情報**: 利用可能なAWSリージョンの一覧やサービスの対応状況を確認できます
+4. **AWSコマンド提案**: AWS APIの使い方を提案できます
+5. **AWS API呼び出し**: 読み取り専用のAWS APIを実行できます（Describe*、List*、Get*操作）
+
+何かお手伝いできることはありますか？
 ----------------------------------------
 完了
 ```
+
+## AWS MCP Tools について
+
+このエージェントは [AWS MCP Server](https://aws-mcp.us-east-1.api.aws/mcp) と統合されており、以下の操作が可能です：
+
+### 読み取り専用の制限
+
+セキュリティのため、AWS API 呼び出しは**読み取り専用操作のみ**に制限されています：
+- `Describe*` 操作（例: `DescribeInstances`）
+- `List*` 操作（例: `ListBuckets`）
+- `Get*` 操作（例: `GetFunction`）
+
+書き込み操作（`Create*`, `Update*`, `Delete*` など）は実行できません。
 
 ## クリーンアップ
 
